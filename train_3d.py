@@ -116,6 +116,7 @@ def init_dataset_kwargs(data, opt=None):
                 data_camera_mode=opt.data_camera_mode,
                 add_camera_cond=opt.add_camera_cond,
                 camera_path=opt.camera_path,
+                mesh_path=opt.mesh_path,
                 split='test' if opt.inference_vis else 'train',
             )
         else:
@@ -125,9 +126,11 @@ def init_dataset_kwargs(data, opt=None):
                 data_camera_mode=opt.data_camera_mode,
                 add_camera_cond=opt.add_camera_cond,
                 camera_path=opt.camera_path,
+                mesh_path=opt.mesh_path,
             )
         dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs)  # Subclass of training.dataset.Dataset.
         dataset_kwargs.camera_path = opt.camera_path
+        dataset_kwargs.mesh_path = opt.mesh_path
         dataset_kwargs.resolution = dataset_obj.resolution  # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels  # Be explicit about labels.
         dataset_kwargs.max_size = len(dataset_obj)  # Be explicit about dataset size.
@@ -167,6 +170,7 @@ def parse_comma_separated_list(s):
 
 @click.option('--data', help='Path to the Training data Images', metavar='[DIR]', type=str, default='./tmp')
 @click.option('--camera_path', help='Path to the camera root', metavar='[DIR]', type=str, default='./tmp')
+@click.option('--mesh_path', help='Path to the mesh data', metavar='[DIR]', type=str, default='./tmp')
 @click.option('--img_res', help='The resolution of image', metavar='INT', type=click.IntRange(min=1), default=1024)
 @click.option('--data_camera_mode', help='The type of dataset we are using', type=str, default='shapenet_car', show_default=True)
 @click.option('--use_shapenet_split', help='whether use the training split or all the data for training', metavar='BOOL', type=bool, default=False, show_default=False)

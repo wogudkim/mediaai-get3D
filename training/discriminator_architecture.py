@@ -607,6 +607,30 @@ class Discriminator(torch.nn.Module):
             mask_channels_dict[4], cmap_dim=cmap_dim, resolution=4, device=device, **epilogue_kwargs,
             **common_kwargs)
 
+        #==================================================================================================================================================================
+        self.conv1 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=3, out_channels=32, kernel_size=5, stride=4),
+            torch.nn.BatchNorm1d(32),
+            torch.nn.ReLU()
+        )
+
+        self.conv2 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=32, out_channels=64, kernel_size=5, stride=4),
+            torch.nn.BatchNorm1d(64),
+            torch.nn.ReLU()
+        )
+
+        self.conv3 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=64, out_channels=128, kernel_size=5, stride=4),
+            torch.nn.BatchNorm1d(128),
+            torch.nn.ReLU()
+        )
+
+        self.flatten = torch.nn.Flatten()
+        self.linear = torch.nn.Linear(128*780, 1)
+        self.sigmoid = torch.nn.Sigmoid()
+        #==================================================================================================================================================================
+
     def pos_enc_angle(self, camera_angle):
         # Encode the camera angles into cos/sin
         if self.data_camera_mode == 'shapenet_car' \
@@ -624,6 +648,7 @@ class Discriminator(torch.nn.Module):
             raise NotImplementedError
         return p_transformed
 
+    """
     def forward(self, img, c, update_emas=False, alpha=1.0, mask_pyramid=None, **block_kwargs):
         # Encoding camera condition first
         if self.add_camera_cond:
@@ -662,6 +687,72 @@ class Discriminator(torch.nn.Module):
             cmap = self.mapping(None, c)
         x = self.b4(x, img_for_tex, cmap)
         return x, mask_x
+        """
+
+    def forward(self, img, c, vertice, update_emas=False, alpha=1.0, mask_pyramid=None, **block_kwargs):
+
+        # Encoding camera condition first
+        if self.add_camera_cond:
+            if self.conditional_dim == 0:
+                c = self.pos_enc_angle(c)
+            else:
+                condition_c = c[:, :self.conditional_dim]
+                pos_encode_c = self.pos_enc_angle(c[:, self.conditional_dim:])
+                c = torch.cat([condition_c, pos_encode_c], dim=-1)
+        else:
+            c = None
+
+        # Step 1: feed the mask image into the discriminator
+        _ = update_emas
+        mask_x = None
+        img_res = img.shape[-1]
+        mask_img = img[:, self.img_channels_drgb:self.img_channels_drgb + self.img_channels_dmask]  # This is only supervising the geometry
+        for res in self.block_resolutions:
+            block = getattr(self, f'mask_b{res}')
+            mask_x, mask_img = block(mask_x, mask_img, alpha, (img_res // 2) == res, **block_kwargs)
+        mask_cmap = None
+        if self.c_dim > 0:
+            mask_cmap = self.mask_mapping(None, c)
+        mask_x = self.mask_b4(mask_x, mask_img, mask_cmap)
+
+        # Step 2: feed the RGB image into another discriminator
+        img_for_tex = img[:, :self.img_channels_drgb, :, :]
+        _ = update_emas
+        x = None
+        img_res = img_for_tex.shape[-1]
+        for res in self.block_resolutions:
+            block = getattr(self, f'b{res}')
+            x, img_for_tex = block(x, img_for_tex, alpha, (img_res // 2) == res, **block_kwargs)
+        cmap = None
+        if self.c_dim > 0:
+            cmap = self.mapping(None, c)
+        x = self.b4(x, img_for_tex, cmap)
+
+        # padding 1D tensor
+        _ = update_emas
+        mesh_v_list = []
+        mesh_x = None
+        for i in range(len(vertice)):
+            mesh_v = vertice[0]
+            pad = torch.zeros(50000-len(mesh_v), 3).to(mesh_v.device)
+            mesh_v = torch.cat((mesh_v, pad), dim=0).unsqueeze(0).permute(0, 2, 1)
+            mesh_v_list.append(mesh_v)
+        mesh_x = torch.cat(mesh_v_list, axis=0)
+
+        # Step 3: feed the vertices into another discriminator
+        mesh_x = self.conv1(mesh_x)
+        print(mesh_x.shape)
+        mesh_x = self.conv2(mesh_x)
+        print(mesh_x.shape)
+        mesh_x = self.conv3(mesh_x)
+        print(mesh_x.shape)
+
+        mesh_x = self.flatten(mesh_x)
+        mesh_x = self.linear(mesh_x)
+        mesh_x = self.sigmoid(mesh_x)
+        print(mesh_x.shape)
+        
+        return x, mask_x, mesh_x
 
     def extra_repr(self):
         return f'c_dim={self.c_dim:d}, img_resolution={self.img_resolution:d}, img_channels={self.img_channels:d}'
