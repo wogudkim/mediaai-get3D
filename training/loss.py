@@ -31,6 +31,23 @@ def sdf_reg_loss_batch(sdf, all_edges):
                    sdf_f1x6x2[..., 1], (sdf_f1x6x2[..., 0] > 0).float())
     return sdf_diff
 
+def angle_loss_batch(mesh_v,mesh_f):
+    mesh_map = torch.index_select(torch.cat(mesh_v),0,torch.cat(mesh_f).reshape(-1)).reshape(-1,3,3)
+    vector = mesh_map - mesh_map.roll(-1,1) #(-1,3,3)
+    cos = torch.nn.CosineSimilarity(dim=2, eps=1e-6)
+    loss_Angle = (cos(vector,-vector.roll(-1,1))*2-1).abs().mean()
+
+    return loss_Angle,vector,mesh_map
+
+def edge_loss_batch(vector):#needs ground truth data
+    gt_edge = torch.tensor(0.0088)
+    norm = torch.linalg.vector_norm(vector,2,2)
+    loss_Edge = (gt_edge - norm.mean()).abs()
+    return loss_Edge,norm
+
+def cd_loss_batch(norm):
+    loss_CD = norm - norm.mean()
+    return loss_CD.linalg.norm(2,2)
 
 class StyleGAN2Loss(Loss):
     def __init__(
@@ -128,6 +145,27 @@ class StyleGAN2Loss(Loss):
                 loss_Gmask = torch.nn.functional.softplus(-gen_logits_mask).mean()
                 training_stats.report('Loss/G/loss_mask', loss_Gmask)
                 loss_Gmain += loss_Gmask
+
+                useLossAngle = True
+                useLossEdge = True
+                useLossSD = False
+
+                if useLossAngle or useLossEdge:
+                    loss_Angle,vector,mesh_map = angle_loss_batch(mesh_v,mesh_f)
+
+                    if useLossAngle:
+                        training_stats.report('Loss/G/loss_angle',loss_Angle)
+                        loss_Gmain += loss_Angle
+                    if useLossEdge:
+                        loss_Edge,norm = edge_loss_batch(vector)
+                        
+                        training_stats.report('Loss/G/loss_Edge',loss_Edge)
+                        loss_Gmain += loss_Edge
+                    if useLossSD:
+                        loss_SD = (norm-norm.mean()).reshape(-1).square().mean().sqrt()
+                        training_stats.report('Loss/G/loss_SD',loss_SD)
+                        loss_Gmain += loss_SD
+
                 training_stats.report('Loss/G/loss', loss_Gmain)
 
                 # Regularization loss for sdf prediction
