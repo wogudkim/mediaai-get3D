@@ -315,9 +315,29 @@ class ImageFolderDataset(Dataset):
                     obj_scene = trimesh.load_mesh(os.path.join(self.mesh_root, syn_idx, obj_idx, 'model.obj'))
                     condinfo[0] = rotation_camera[img_idx] / 180 * np.pi
                     condinfo[1] = (90 - elevation_camera[img_idx]) / 180.0 * np.pi
-                    obj_mesh_list = obj_scene.dump()
-                    vinfo = np.concatenate([obj_mesh_list[i].vertices for i in range(len(obj_mesh_list))], dtype=float)
-                    finfo = np.concatenate([obj_mesh_list[i].faces for i in range(len(obj_mesh_list))], dtype=float)
+                    if(type(obj_scene) == trimesh.Scene):
+                        obj_mesh_list = obj_scene.dump()
+                        vinfo = np.concatenate([obj_mesh_list[i].vertices for i in range(len(obj_mesh_list))], dtype=float)
+                        if(len(vinfo) > 200000):
+                            vinfo = vinfo[:200000, :]
+                        else:
+                            vinfo = np.concatenate((vinfo, np.zeros(shape=(200000-len(vinfo), 3), dtype=float)),axis=0, dtype=float)
+                        finfo = np.concatenate([obj_mesh_list[i].faces for i in range(len(obj_mesh_list))], dtype=float)
+                        if(len(finfo) > 200000):
+                            finfo = finfo[:200000, :]
+                        else:
+                            finfo = np.concatenate((finfo, np.zeros(shape=(200000-len(finfo), 3), dtype=float)),axis=0, dtype=float)
+                    else:
+                        vinfo = np.array(obj_scene.vertices, dtype=float)
+                        if(len(vinfo) > 200000):
+                            vinfo = vinfo[:200000, :]
+                        else:
+                            vinfo = np.concatenate((vinfo, np.zeros(shape=(200000-len(vinfo), 3), dtype=float)),axis=0, dtype=float)
+                        finfo = np.array(obj_scene.faces, dtype=float)
+                        if(len(finfo) > 200000):
+                            finfo = finfo[:200000, :]
+                        else:
+                            finfo = np.concatenate((finfo, np.zeros(shape=(200000-len(finfo), 3), dtype=float)),axis=0, dtype=float)
         else:
             raise NotImplementedError
 
@@ -328,8 +348,8 @@ class ImageFolderDataset(Dataset):
             mask = np.ones(1)
         img = resize_img.transpose(2, 0, 1)
         background = np.zeros_like(img)
-        img = img * (mask > 0).astype(np.float) + background * (1 - (mask > 0).astype(np.float))
-        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask), np.ascontiguousarray(vinfo), np.ascontiguousarray(finfo)
+        img = img * (mask > 0).astype(np.float32) + background * (1 - (mask > 0).astype(np.float32))
+        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask), vinfo
 
     def _load_raw_image(self, raw_idx):
         if raw_idx >= len(self._image_fnames) or not os.path.exists(self._image_fnames[raw_idx]):

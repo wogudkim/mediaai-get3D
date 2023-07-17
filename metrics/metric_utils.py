@@ -262,7 +262,7 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
     random_dataset = np.random.permutation(list(range(len(dataset))))
     item_subset = [random_dataset[(i * opts.num_gpus + opts.rank) % num_items] for i in range((num_items - 1) // opts.num_gpus + 1)]
 
-    for images, _labels, _masks in tqdm(
+    for images, _labels, _masks, _mesh_v in tqdm(
             torch.utils.data.DataLoader(
                 dataset=dataset, sampler=item_subset,
                 batch_size=batch_size // opts.num_gpus, **data_loader_kwargs)):

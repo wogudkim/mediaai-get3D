@@ -626,8 +626,20 @@ class Discriminator(torch.nn.Module):
             torch.nn.ReLU()
         )
 
+        self.conv4 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=128, out_channels=256, kernel_size=5, stride=4),
+            torch.nn.BatchNorm1d(256),
+            torch.nn.ReLU()
+        )
+
+        self.conv5 = nn.Sequential(
+            torch.nn.Conv1d(in_channels=256, out_channels=512, kernel_size=5, stride=4),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU()
+        )
+
         self.flatten = torch.nn.Flatten()
-        self.linear = torch.nn.Linear(128*780, 1)
+        self.linear = torch.nn.Linear(512*194, 1)
         self.sigmoid = torch.nn.Sigmoid()
         #==================================================================================================================================================================
 
@@ -733,24 +745,25 @@ class Discriminator(torch.nn.Module):
         mesh_v_list = []
         mesh_x = None
         for i in range(len(vertice)):
-            mesh_v = vertice[0]
-            pad = torch.zeros(50000-len(mesh_v), 3).to(mesh_v.device)
-            mesh_v = torch.cat((mesh_v, pad), dim=0).unsqueeze(0).permute(0, 2, 1)
+            mesh_v = vertice[i]
+            if(len(mesh_v) > 200000):
+                mesh_v = mesh_v[:200000, :].unsqueeze(0).permute(0, 2, 1)
+            else:
+                pad = torch.zeros(200000-len(mesh_v), 3).to(mesh_v.device)
+                mesh_v = torch.cat((mesh_v, pad), dim=0).unsqueeze(0).permute(0, 2, 1)
             mesh_v_list.append(mesh_v)
-        mesh_x = torch.cat(mesh_v_list, axis=0)
+        mesh_x = torch.cat(mesh_v_list, axis=0).float()
 
         # Step 3: feed the vertices into another discriminator
         mesh_x = self.conv1(mesh_x)
-        print(mesh_x.shape)
         mesh_x = self.conv2(mesh_x)
-        print(mesh_x.shape)
         mesh_x = self.conv3(mesh_x)
-        print(mesh_x.shape)
+        mesh_x = self.conv4(mesh_x)
+        mesh_x = self.conv5(mesh_x)
 
         mesh_x = self.flatten(mesh_x)
         mesh_x = self.linear(mesh_x)
         mesh_x = self.sigmoid(mesh_x)
-        print(mesh_x.shape)
         
         return x, mask_x, mesh_x
 

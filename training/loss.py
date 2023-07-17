@@ -15,7 +15,7 @@ from torch_utils.ops import conv2d_gradfix
 # ----------------------------------------------------------------------------
 class Loss:
     def accumulate_gradients(
-            self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):  # to be overridden by subclass
+            self, phase, real_img, real_c, real_v, gen_z, gen_c, gain, cur_nimg):  # to be overridden by subclass
         raise NotImplementedError()
 
 
@@ -93,7 +93,7 @@ class StyleGAN2Loss(Loss):
         return logits
 
     def accumulate_gradients(
-            self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
+            self, phase, real_img, real_c, real_v, gen_z, gen_c, gain, cur_nimg):
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         if self.pl_weight == 0:
             phase = {'Greg': 'none', 'Gboth': 'Gmain'}.get(phase, phase)
@@ -208,8 +208,8 @@ class StyleGAN2Loss(Loss):
                 # Optimize for the real image
                 real_img_tmp = real_img.detach().requires_grad_(phase in ['Dreg', 'Dboth'])
 
-                real_logits = self.run_D(real_img_tmp, real_c, )
-                real_logits, real_logits_mask = real_logits
+                real_logits = self.run_D(real_img_tmp, real_c, real_v)
+                real_logits, real_logits_mask, real_logits_mesh = real_logits
 
                 training_stats.report('Loss/scores/real', real_logits)
                 training_stats.report('Loss/signs/real', real_logits.sign())
@@ -226,7 +226,12 @@ class StyleGAN2Loss(Loss):
                         -real_logits_mask).mean()  # -log(sigmoid(real_logits))
                     training_stats.report('Loss/D/loss_real_mask', loss_Dreal_mask)
                     loss_Dreal += loss_Dreal_mask
-                    training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
+                    training_stats.report('Loss/D/loss_origin', loss_Dgen + loss_Dreal)
+                    loss_Dreal_mesh = torch.nn.functional.softplus(
+                        -real_logits_mesh).mean()  # -log(sigmoid(real_logits))
+                    training_stats.report('Loss/D/loss_real_mesh', loss_Dreal_mesh)
+                    loss_Dreal += loss_Dreal_mesh
+                    training_stats.report('Loss/D/loss_new', loss_Dgen + loss_Dreal)
 
                 loss_Dr1 = 0
                 # Compute R1 regularization for discriminator

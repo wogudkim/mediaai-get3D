@@ -195,6 +195,7 @@ def parse_comma_separated_list(s):
 @click.option('--gamma_mask', help='R1 regularization weight for mask', metavar='FLOAT', type=click.FloatRange(min=0), default=0.0, required=False)
 @click.option('--d_reg_interval', help='The internal for R1 regularization', metavar='INT', type=click.IntRange(min=1), default=16)
 @click.option('--add_camera_cond', help='Whether we add camera as condition for discriminator', metavar='BOOL', type=bool, default=True, show_default=True)
+@click.option('--add_mesh_data', help='Whether we add vertices data for discriminator', metavar='BOOL', type=bool, default=False, show_default=False)
 ## Miscs
 # Optional features.
 @click.option('--cond', help='Train conditional model', metavar='BOOL', type=bool, default=False, show_default=True)

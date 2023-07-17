@@ -261,12 +261,13 @@ def training_loop(
     while True:
         # Fetch training data.
         with torch.autograd.profiler.record_function('data_fetch'):
-            phase_real_img, phase_real_c, real_mask = next(training_set_iterator)
+            phase_real_img, phase_real_c, real_mask, phase_real_v = next(training_set_iterator)
             phase_real_img = (phase_real_img.to(device).to(torch.float32) / 127.5 - 1)
             real_mask = real_mask.to(device).to(torch.float32).unsqueeze(dim=1)
             real_mask = (real_mask > 0).float()
             phase_real_img = torch.cat([phase_real_img, real_mask], dim=1)
             phase_real_img = phase_real_img.split(batch_gpu)
+            phase_real_v = phase_real_v.to(device).split(batch_gpu)
             phase_real_c = phase_real_c.to(device).split(batch_gpu)
             all_gen_z = torch.randn([len(phases) * (batch_size // num_gpus), G.z_dim], device=device)
             all_gen_z = [phase_gen_z.split(batch_gpu) for phase_gen_z in all_gen_z.split((batch_size // num_gpus))]
@@ -284,9 +285,9 @@ def training_loop(
             # Accumulate gradients.
             phase.opt.zero_grad(set_to_none=False)
             phase.module.requires_grad_(True)
-            for real_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_gen_z, phase_gen_c):
+            for real_img, real_c, real_v, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_real_v, phase_gen_z, phase_gen_c):
                 loss.accumulate_gradients(
-                    phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c,
+                    phase=phase.name, real_img=real_img, real_c=real_c, real_v=real_v, gen_z=gen_z, gen_c=gen_c,
                     gain=phase.interval, cur_nimg=cur_nimg)
             phase.module.requires_grad_(False)
 
@@ -446,6 +447,7 @@ def training_loop(
         tick_start_nimg = cur_nimg
         tick_start_time = time.time()
         maintenance_time = tick_start_time - tick_end_time
+
         if done:
             break
     # Done.
