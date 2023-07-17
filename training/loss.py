@@ -32,6 +32,51 @@ def sdf_reg_loss_batch(sdf, all_edges):
     return sdf_diff
 
 
+#-----------------------------------------------------------------------------
+def get_mesh_feature(mesh_v,mesh_f):
+    mesh_map = get_mesh_map(mesh_v,mesh_f)
+
+    vector = mesh_map - mesh_map.roll(-1,1) #(-1,3,3)
+    norm = torch.linalg.vector_norm(vector,2,2)
+    sd = (norm-norm.mean()).reshape(-1).square().mean().sqrt()
+    return mesh_map,vector,norm,sd
+
+def get_mesh_map(mesh_v, mesh_f):
+    combined_tensor = torch.cat(mesh_v)
+    combined_indices = torch.cat([f + start for f, start in zip(mesh_f, torch.cumsum(torch.tensor([0] + [len(t) for t in mesh_v[:-1]]), dim=0))])
+    mesh_map = combined_tensor[combined_indices].reshape(-1, 3, 3)
+    training_stats.report('Mesh/mesh/4_batch_size',len(mesh_map))
+    return mesh_map
+
+def customTraining(loss_Gmain,mesh_v,mesh_f):
+    useLossEdge = False
+    
+    if useLossEdge:
+        mesh_map,vector,norm,sd = get_mesh_feature(mesh_v,mesh_f)
+
+        if useLossEdge:
+            useGT = True
+            useMean = False
+            useSD = False
+
+            if useGT:
+                w = 3
+
+                loss_Edge = (torch.tensor(0.0088)- norm.mean()).abs()*w
+                training_stats.report('Loss/G/loss_Edge_gt',loss_Edge)
+                loss_Gmain += loss_Edge
+            if useMean:
+                loss_Edge = norm.mean()
+                training_stats.report('Loss/G/loss_Edge_mean',loss_Edge)
+                loss_Gmain += loss_Edge
+
+            if useSD:
+                loss_SD = sd
+                training_stats.report('Loss/G/loss_Edge_SD',loss_SD)
+                loss_Gmain += loss_SD
+        return loss_Gmain
+#-----------------------------------------------------------------------------
+
 class StyleGAN2Loss(Loss):
     def __init__(
             self, device, G, D, r1_gamma=10, style_mixing_prob=0, pl_weight=0,
@@ -140,6 +185,12 @@ class StyleGAN2Loss(Loss):
                 loss_Gmesh = torch.nn.functional.softplus(-gen_logits_mesh).mean()
                 training_stats.report('Loss/G/loss_mesh', loss_Gmesh)
                 loss_Gmain += loss_Gmesh
+
+                #---------------------------------------------------------------------------
+                useCustomTraining = False
+                if useCustomTraining: loss_Gmain = customTraining(loss_Gmain,mesh_v,mesh_f)
+                #---------------------------------------------------------------------------
+
                 training_stats.report('Loss/G/loss', loss_Gmain)
 
                 # Regularization loss for sdf prediction
