@@ -1,1 +1,0 @@
-# mediaai-get3d
