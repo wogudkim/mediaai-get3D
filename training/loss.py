@@ -15,7 +15,7 @@ from torch_utils.ops import conv2d_gradfix
 # ----------------------------------------------------------------------------
 class Loss:
     def accumulate_gradients(
-            self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):  # to be overridden by subclass
+            self, phase, real_img, real_c, real_v, gen_z, gen_c, gain, cur_nimg):  # to be overridden by subclass
         raise NotImplementedError()
 
 
@@ -84,12 +84,16 @@ class StyleGAN2Loss(Loss):
                 ws_geo=ws_geo)
         return img, ws, syn_camera, mask_pyramid, render_return_value
 
-    def run_D(self, img, c, update_emas=False, mask_pyramid=None):
-        logits = self.D(img, c, update_emas=update_emas, mask_pyramid=mask_pyramid)
+    #def run_D(self, img, c, update_emas=False, mask_pyramid=None):
+    #    logits = self.D(img, c, update_emas=update_emas, mask_pyramid=mask_pyramid)
+    #    return logits
+    
+    def run_D(self, img, c, vertice, update_emas=False, mask_pyramid=None):
+        logits = self.D(img, c, vertice, update_emas=update_emas, mask_pyramid=mask_pyramid)
         return logits
 
     def accumulate_gradients(
-            self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
+            self, phase, real_img, real_c, real_v, gen_z, gen_c, gain, cur_nimg):
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         if self.pl_weight == 0:
             phase = {'Greg': 'none', 'Gboth': 'Gmain'}.get(phase, phase)
@@ -115,8 +119,9 @@ class StyleGAN2Loss(Loss):
                 else:
                     assert NotImplementedError
                 # Send to discriminator
-                gen_logits = self.run_D(gen_img, camera_condition, mask_pyramid=mask_pyramid)
-                gen_logits, gen_logits_mask = gen_logits
+                #gen_logits = self.run_D(gen_img, camera_condition, mask_pyramid=mask_pyramid)
+                gen_logits = self.run_D(gen_img, camera_condition, vertice=mesh_v, mask_pyramid=mask_pyramid)
+                gen_logits, gen_logits_mask, gen_logits_mesh = gen_logits
 
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
@@ -128,6 +133,13 @@ class StyleGAN2Loss(Loss):
                 loss_Gmask = torch.nn.functional.softplus(-gen_logits_mask).mean()
                 training_stats.report('Loss/G/loss_mask', loss_Gmask)
                 loss_Gmain += loss_Gmask
+                training_stats.report('Loss/G/loss_rgbmask', loss_Gmain)
+
+                training_stats.report('Loss/scores/fake_mesh', gen_logits_mesh)
+                training_stats.report('Loss/signs/fake_mesh', gen_logits_mesh.sign())
+                loss_Gmesh = torch.nn.functional.softplus(-gen_logits_mesh).mean()
+                training_stats.report('Loss/G/loss_mesh', loss_Gmesh)
+                loss_Gmain += loss_Gmesh
                 training_stats.report('Loss/G/loss', loss_Gmain)
 
                 # Regularization loss for sdf prediction
@@ -148,8 +160,9 @@ class StyleGAN2Loss(Loss):
         if phase in ['Dmain', 'Dboth']:
             with torch.autograd.profiler.record_function('Dgen_forward'):
                 # First generate the rendered image of generated 3D shapes
-                gen_img, _gen_ws, gen_camera, mask_pyramid, render_return_value = self.run_G(
-                    gen_z, gen_c, update_emas=True)
+                gen_img, gen_sdf, _gen_ws, gen_camera, deformation, v_deformed, mesh_v, mesh_f, mask_pyramid, _gen_ws_geo, \
+                sdf_reg_loss, render_return_value = self.run_G(
+                    gen_z, gen_c, return_shape=True) #update_emas=True
                 if self.G.synthesis.data_camera_mode == 'shapenet_car' or self.G.synthesis.data_camera_mode == 'shapenet_chair' \
                         or self.G.synthesis.data_camera_mode == 'shapenet_motorbike' or self.G.synthesis.data_camera_mode == 'renderpeople' or \
                         self.G.synthesis.data_camera_mode == 'shapenet_plant' or self.G.synthesis.data_camera_mode == 'shapenet_vase' or \
@@ -161,9 +174,9 @@ class StyleGAN2Loss(Loss):
 
                 # Send it to discriminator
                 gen_logits = self.run_D(
-                    gen_img, camera_condition, update_emas=True, mask_pyramid=mask_pyramid)
+                    gen_img, camera_condition, vertice=mesh_v, update_emas=True, mask_pyramid=mask_pyramid)
 
-                gen_logits, gen_logits_mask = gen_logits
+                gen_logits, gen_logits_mask, gen_logits_mesh = gen_logits
 
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
@@ -177,6 +190,13 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/D/loss_gen_mask', loss_Dgen_mask)
                 loss_Dgen += loss_Dgen_mask
 
+                training_stats.report('Loss/scores/fake_mesh', gen_logits_mesh)
+                training_stats.report('Loss/signs/fake_mesh', gen_logits_mesh.sign())
+                loss_Dgen_mesh = torch.nn.functional.softplus(
+                    gen_logits_mesh).mean()  # -log(1 - sigmoid(gen_logits))
+                training_stats.report('Loss/D/loss_gen_mesh', loss_Dgen_mesh)
+                loss_Dgen += loss_Dgen_mesh
+
             with torch.autograd.profiler.record_function('Dgen_backward'):
                 loss_Dgen.mean().mul(gain).backward()
 
@@ -188,8 +208,8 @@ class StyleGAN2Loss(Loss):
                 # Optimize for the real image
                 real_img_tmp = real_img.detach().requires_grad_(phase in ['Dreg', 'Dboth'])
 
-                real_logits = self.run_D(real_img_tmp, real_c, )
-                real_logits, real_logits_mask = real_logits
+                real_logits = self.run_D(real_img_tmp, real_c, real_v)
+                real_logits, real_logits_mask, real_logits_mesh = real_logits
 
                 training_stats.report('Loss/scores/real', real_logits)
                 training_stats.report('Loss/signs/real', real_logits.sign())
@@ -206,7 +226,12 @@ class StyleGAN2Loss(Loss):
                         -real_logits_mask).mean()  # -log(sigmoid(real_logits))
                     training_stats.report('Loss/D/loss_real_mask', loss_Dreal_mask)
                     loss_Dreal += loss_Dreal_mask
-                    training_stats.report('Loss/D/loss', loss_Dgen + loss_Dreal)
+                    training_stats.report('Loss/D/loss_origin', loss_Dgen + loss_Dreal)
+                    loss_Dreal_mesh = torch.nn.functional.softplus(
+                        -real_logits_mesh).mean()  # -log(sigmoid(real_logits))
+                    training_stats.report('Loss/D/loss_real_mesh', loss_Dreal_mesh)
+                    loss_Dreal += loss_Dreal_mesh
+                    training_stats.report('Loss/D/loss_new', loss_Dgen + loss_Dreal)
 
                 loss_Dr1 = 0
                 # Compute R1 regularization for discriminator

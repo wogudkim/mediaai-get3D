@@ -13,7 +13,7 @@ import zipfile
 import torch
 import dnnlib
 import cv2
-
+import trimesh
 try:
     import pyspng
 except ImportError:
@@ -153,6 +153,7 @@ class ImageFolderDataset(Dataset):
             self,
             path,  # Path to directory or zip.
             camera_path,  # Path to camera
+            mesh_path, # Path to mesh
             resolution=None,  # Ensure specific resolution, None = highest available.
             data_camera_mode='shapenet_car',
             add_camera_cond=False,
@@ -167,6 +168,7 @@ class ImageFolderDataset(Dataset):
         self.add_camera_cond = add_camera_cond
         root = self._path
         self.camera_root = camera_path
+        self.mesh_root = mesh_path
         if data_camera_mode == 'shapenet_car' or data_camera_mode == 'shapenet_chair' \
                 or data_camera_mode == 'renderpeople' or data_camera_mode == 'shapenet_motorbike' \
                 or data_camera_mode == 'ts_house' \
@@ -296,17 +298,46 @@ class ImageFolderDataset(Dataset):
             img_idx = int(fname_list[-1].split('.')[0])
             obj_idx = fname_list[-2]
             syn_idx = fname_list[-3]
+            vinfo = None
+            finfo = None
+
 
             if self.data_camera_mode == 'shapenet_car' or self.data_camera_mode == 'shapenet_chair' \
                     or self.data_camera_mode == 'renderpeople' or self.data_camera_mode == 'shapenet_motorbike' \
                     or self.data_camera_mode == 'ts_house' or self.data_camera_mode == 'ts_animal':
                 if not os.path.exists(os.path.join(self.camera_root, syn_idx, obj_idx, 'rotation.npy')):
                     print('==> not found camera root')
+                if not os.path.exists(os.path.join(self.mesh_root, syn_idx, obj_idx, 'model.obj')):
+                    print('==> not found mesh root')
                 else:
                     rotation_camera = np.load(os.path.join(self.camera_root, syn_idx, obj_idx, 'rotation.npy'))
                     elevation_camera = np.load(os.path.join(self.camera_root, syn_idx, obj_idx, 'elevation.npy'))
+                    obj_scene = trimesh.load_mesh(os.path.join(self.mesh_root, syn_idx, obj_idx, 'model.obj'))
                     condinfo[0] = rotation_camera[img_idx] / 180 * np.pi
                     condinfo[1] = (90 - elevation_camera[img_idx]) / 180.0 * np.pi
+                    if(type(obj_scene) == trimesh.Scene):
+                        obj_mesh_list = obj_scene.dump()
+                        vinfo = np.concatenate([obj_mesh_list[i].vertices for i in range(len(obj_mesh_list))], dtype=float)
+                        if(len(vinfo) > 200000):
+                            vinfo = vinfo[:200000, :]
+                        else:
+                            vinfo = np.concatenate((vinfo, np.zeros(shape=(200000-len(vinfo), 3), dtype=float)),axis=0, dtype=float)
+                        finfo = np.concatenate([obj_mesh_list[i].faces for i in range(len(obj_mesh_list))], dtype=float)
+                        if(len(finfo) > 200000):
+                            finfo = finfo[:200000, :]
+                        else:
+                            finfo = np.concatenate((finfo, np.zeros(shape=(200000-len(finfo), 3), dtype=float)),axis=0, dtype=float)
+                    else:
+                        vinfo = np.array(obj_scene.vertices, dtype=float)
+                        if(len(vinfo) > 200000):
+                            vinfo = vinfo[:200000, :]
+                        else:
+                            vinfo = np.concatenate((vinfo, np.zeros(shape=(200000-len(vinfo), 3), dtype=float)),axis=0, dtype=float)
+                        finfo = np.array(obj_scene.faces, dtype=float)
+                        if(len(finfo) > 200000):
+                            finfo = finfo[:200000, :]
+                        else:
+                            finfo = np.concatenate((finfo, np.zeros(shape=(200000-len(finfo), 3), dtype=float)),axis=0, dtype=float)
         else:
             raise NotImplementedError
 
@@ -317,8 +348,8 @@ class ImageFolderDataset(Dataset):
             mask = np.ones(1)
         img = resize_img.transpose(2, 0, 1)
         background = np.zeros_like(img)
-        img = img * (mask > 0).astype(np.float) + background * (1 - (mask > 0).astype(np.float))
-        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask)
+        img = img * (mask > 0).astype(np.float32) + background * (1 - (mask > 0).astype(np.float32))
+        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask), vinfo
 
     def _load_raw_image(self, raw_idx):
         if raw_idx >= len(self._image_fnames) or not os.path.exists(self._image_fnames[raw_idx]):
