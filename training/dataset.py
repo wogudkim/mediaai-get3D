@@ -349,7 +349,7 @@ class ImageFolderDataset(Dataset):
         img = resize_img.transpose(2, 0, 1)
         background = np.zeros_like(img)
         img = img * (mask > 0).astype(np.float32) + background * (1 - (mask > 0).astype(np.float32))
-        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask), vinfo
+        return np.ascontiguousarray(img), condinfo, np.ascontiguousarray(mask), vinfo##, finfo
 
     def _load_raw_image(self, raw_idx):
         if raw_idx >= len(self._image_fnames) or not os.path.exists(self._image_fnames[raw_idx]):

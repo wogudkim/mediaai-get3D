@@ -1,0 +1,21 @@
+## Ignore File ##
+
+dnnlib/__pycache__/
+
+metrics/__pycache__/
+
+torch_utils/__pycache__/
+
+torch_utils/ops/__pycache__/
+
+training/__pycache__/
+
+training/utils/__pycache__/
+
+uni_rep/__pycache__/
+
+uni_rep/camera/__pycache__/
+
+uni_rep/render/__pycache__/
+
+uni_rep/rep_3d/__pycache__/
